@@ -1,4 +1,4 @@
-from typing import Union, Any, Literal
+from typing import Union, Any, Literal, Optional
 
 import pandas as pd
 import numpy as np
@@ -174,6 +174,7 @@ def _refine_peaks_3d_torch(
     max_iterations: int,
     learning_rate: float,
     tolerance: float,
+    sigma_min_max: Optional[tuple] = None,
 ) -> torch.Tensor:
     """
     Internal function to refine the positions of peaks in a 3D tensor.
@@ -245,9 +246,16 @@ def _refine_peaks_3d_torch(
         # Ensure positive values for amplitude and sigma
         with torch.no_grad():
             model.amplitude.data.clamp_(min=0)
-            model.sigma_x.data.clamp_(min=0.001)
-            model.sigma_y.data.clamp_(min=0.001)
-            model.sigma_z.data.clamp_(min=0.001)
+            if sigma_min_max is not None:
+                model.sigma_x.data.clamp_(min=sigma_min_max[0],max=sigma_min_max[1])
+                model.sigma_y.data.clamp_(min=sigma_min_max[0],max=sigma_min_max[1])
+                model.sigma_z.data.clamp_(min=sigma_min_max[0],max=sigma_min_max[1])
+            else:
+                model.sigma_x.data.clamp_(min=0.001)
+                model.sigma_y.data.clamp_(min=0.001)
+                model.sigma_z.data.clamp_(min=0.001)
+
+
 
     # Combine the (...,1) model parameters to a (...,7) tensor
     # and add the peak coordinates in zyx order
@@ -275,6 +283,7 @@ def refine_peaks_3d(
     sigma_x: Union[torch.Tensor, float] = 1.,
     sigma_y: Union[torch.Tensor, float] = 1.,
     sigma_z: Union[torch.Tensor, float] = 1.,
+    sigma_min_max: Optional[tuple] = None,
     return_as: Literal["torch", "numpy", "dataframe"] = "torch",
 ) -> torch.Tensor:
     """
@@ -345,6 +354,7 @@ def refine_peaks_3d(
         max_iterations=max_iterations,
         learning_rate=learning_rate,
         tolerance=tolerance,
+        sigma_min_max=sigma_min_max,
     )
 
     if return_as == "torch":
