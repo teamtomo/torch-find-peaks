@@ -1,4 +1,5 @@
 from typing import Union
+import math
 
 import einops
 import torch
@@ -132,7 +133,9 @@ class Gaussian2D(nn.Module):
                  center_y: Union[torch.Tensor | float] = 0.0,
                  center_x: Union[torch.Tensor | float] = 0.0,
                  sigma_y: Union[torch.Tensor | float] = 1.0,
-                 sigma_x: Union[torch.Tensor | float] = 1.0
+                 sigma_x: Union[torch.Tensor | float] = 1.0,
+                 sigma_bounds: tuple = (0.1, 10.0),
+                 amplitude_bounds: tuple = (0.01, 100.0)
     ):
         super(Gaussian2D, self).__init__()
         # Ensure that the parameters are tensors
@@ -150,11 +153,45 @@ class Gaussian2D(nn.Module):
         assert amplitude.shape == center_y.shape == center_x.shape == sigma_y.shape == sigma_x.shape, \
             "All parameters must have the same shape."
 
-        self.amplitude = nn.Parameter(amplitude)
         self.center_y = nn.Parameter(center_y)
         self.center_x = nn.Parameter(center_x)
-        self.sigma_y = nn.Parameter(sigma_y)
-        self.sigma_x = nn.Parameter(sigma_x)
+        
+        # Store bounds
+        self.sigma_min, self.sigma_max = sigma_bounds
+        self.amplitude_min, self.amplitude_max = amplitude_bounds
+        
+        # Use logarithmic parameterization for amplitude
+        amplitude_clamped = torch.clamp(amplitude, min=self.amplitude_min, max=self.amplitude_max)
+        self.log_amplitude = nn.Parameter(torch.log(amplitude_clamped))
+        
+        # Use logarithmic parameterization for sigma values
+        # Clamp initial sigma values to be within bounds
+        sigma_y_clamped = torch.clamp(sigma_y, min=self.sigma_min, max=self.sigma_max)
+        sigma_x_clamped = torch.clamp(sigma_x, min=self.sigma_min, max=self.sigma_max)
+        
+        self.log_sigma_y = nn.Parameter(torch.log(sigma_y_clamped))
+        self.log_sigma_x = nn.Parameter(torch.log(sigma_x_clamped))
+
+    @property
+    def amplitude(self):
+        """Get amplitude with bounds applied."""
+        return torch.exp(torch.clamp(self.log_amplitude, 
+                                   min=math.log(self.amplitude_min), 
+                                   max=math.log(self.amplitude_max)))
+
+    @property
+    def sigma_y(self):
+        """Get sigma_y with bounds applied."""
+        return torch.exp(torch.clamp(self.log_sigma_y, 
+                                   min=math.log(self.sigma_min), 
+                                   max=math.log(self.sigma_max)))
+    
+    @property  
+    def sigma_x(self):
+        """Get sigma_x with bounds applied."""
+        return torch.exp(torch.clamp(self.log_sigma_x,
+                                   min=math.log(self.sigma_min),
+                                   max=math.log(self.sigma_max)))
 
     def forward(self, grid):
         """
@@ -220,7 +257,10 @@ class Gaussian3D(nn.Module):
                  center_x: Union[torch.Tensor | float] = 0.0,
                  sigma_z: Union[torch.Tensor | float] = 1.0,
                  sigma_y: Union[torch.Tensor | float] = 1.0,
-                 sigma_x: Union[torch.Tensor | float] = 1.0
+                 sigma_x: Union[torch.Tensor | float] = 1.0,
+                 background: Union[torch.Tensor | float] = 0.0,
+                 sigma_bounds: tuple = (0.1, 10.0),
+                 amplitude_bounds: tuple = (0.01, 100.0)
     ):
         super(Gaussian3D, self).__init__()
         # Ensure that the parameters are tensors
@@ -238,17 +278,65 @@ class Gaussian3D(nn.Module):
             sigma_y = torch.tensor(sigma_y)
         if not isinstance(sigma_x, torch.Tensor):
             sigma_x = torch.tensor(sigma_x)
+        if not isinstance(background, torch.Tensor):
+            background = torch.tensor(background)
         # Check if all parameters are of the same shape
-        assert amplitude.shape == center_z.shape == center_y.shape == center_x.shape == sigma_z.shape == sigma_y.shape == sigma_x.shape, \
+        assert amplitude.shape == center_z.shape == center_y.shape == center_x.shape == sigma_z.shape == sigma_y.shape == sigma_x.shape == background.shape, \
             "All parameters must have the same shape."
 
-        self.amplitude = nn.Parameter(amplitude)
         self.center_z = nn.Parameter(center_z)
         self.center_y = nn.Parameter(center_y)
         self.center_x = nn.Parameter(center_x)
-        self.sigma_z = nn.Parameter(sigma_z)
-        self.sigma_y = nn.Parameter(sigma_y)
-        self.sigma_x = nn.Parameter(sigma_x)
+        
+        # Background can be negative or positive, so use linear parameterization
+        self.background = nn.Parameter(background)
+        
+        # Store bounds
+        self.sigma_min, self.sigma_max = sigma_bounds
+        self.amplitude_min, self.amplitude_max = amplitude_bounds
+        
+        # Use logarithmic parameterization for amplitude
+        amplitude_clamped = torch.clamp(amplitude, min=self.amplitude_min, max=self.amplitude_max)
+        self.log_amplitude = nn.Parameter(torch.log(amplitude_clamped))
+        
+        # Use logarithmic parameterization for sigma values
+        # Clamp initial sigma values to be within bounds
+        sigma_z_clamped = torch.clamp(sigma_z, min=self.sigma_min, max=self.sigma_max)
+        sigma_y_clamped = torch.clamp(sigma_y, min=self.sigma_min, max=self.sigma_max)
+        sigma_x_clamped = torch.clamp(sigma_x, min=self.sigma_min, max=self.sigma_max)
+        
+        self.log_sigma_z = nn.Parameter(torch.log(sigma_z_clamped))
+        self.log_sigma_y = nn.Parameter(torch.log(sigma_y_clamped))
+        self.log_sigma_x = nn.Parameter(torch.log(sigma_x_clamped))
+
+    @property
+    def amplitude(self):
+        """Get amplitude with bounds applied."""
+        return torch.exp(torch.clamp(self.log_amplitude, 
+                                   min=math.log(self.amplitude_min), 
+                                   max=math.log(self.amplitude_max)))
+
+
+    @property
+    def sigma_z(self):
+        """Get sigma_z with bounds applied."""
+        return torch.exp(torch.clamp(self.log_sigma_z, 
+                                   min=math.log(self.sigma_min), 
+                                   max=math.log(self.sigma_max)))
+    
+    @property
+    def sigma_y(self):
+        """Get sigma_y with bounds applied."""
+        return torch.exp(torch.clamp(self.log_sigma_y, 
+                                   min=math.log(self.sigma_min), 
+                                   max=math.log(self.sigma_max)))
+    
+    @property  
+    def sigma_x(self):
+        """Get sigma_x with bounds applied."""
+        return torch.exp(torch.clamp(self.log_sigma_x,
+                                   min=math.log(self.sigma_min),
+                                   max=math.log(self.sigma_max)))
 
     def forward(self, grid):
         """
@@ -274,9 +362,10 @@ class Gaussian3D(nn.Module):
         sigma_x = einops.rearrange(self.sigma_x, '... -> 1 1 1 ...')
         sigma_y = einops.rearrange(self.sigma_y, '... -> 1 1 1 ...')
         sigma_z = einops.rearrange(self.sigma_z, '... -> 1 1 1 ...')
+        background = einops.rearrange(self.background, '... -> 1 1 1 ...')
 
 
-        gaussian = amplitude * torch.exp(
+        gaussian = background + amplitude * torch.exp(
             -((grid_x - center_x) ** 2 / (2 * sigma_x ** 2) +
               (grid_y - center_y) ** 2 / (2 * sigma_y ** 2) +
               (grid_z - center_z) ** 2 / (2 * sigma_z ** 2))
